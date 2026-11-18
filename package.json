@@ -23,13 +23,13 @@
     "llm",
     "ai-agent"
   ],
-  "author": "shaikhspeare",
+  "author": "moosasharieff",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/shaikhspeare/wanderlog-mcp.git"
+    "url": "git+https://github.com/moosasharieff/wanderlog-mcp.git"
   },
-  "homepage": "https://github.com/shaikhspeare/wanderlog-mcp#readme",
+  "homepage": "https://github.com/moosasharieff/wanderlog-mcp#readme",
   "scripts": {
     "build": "tsc",
     "dev": "tsx --env-file=.env src/index.ts",
