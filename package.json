@@ -23,13 +23,13 @@
     "llm",
     "ai-agent"
   ],
-  "author": "shaikhspeare",
+  "author": "moosasharieff",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/shaikhspeare/wanderlog-mcp.git"
+    "url": "git+https://github.com/moosasharieff/wanderlog-mcp.git"
   },
-  "homepage": "https://github.com/shaikhspeare/wanderlog-mcp#readme",
+  "homepage": "https://github.com/moosasharieff/wanderlog-mcp#readme",
   "scripts": {
     "build": "tsc",
     "dev": "tsx --env-file=.env src/index.ts",
@@ -45,6 +45,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "newrelic": "^14.4.0",
     "ws": "^8.21.0",
     "zod": "^4.4.3"
   },

@@ -12,4 +12,4 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist dist/
 EXPOSE 3000
-CMD ["node", "dist/http.js"]
+CMD ["node", "--require", "newrelic", "--import", "newrelic/esm-loader.mjs", "dist/http.js"]
