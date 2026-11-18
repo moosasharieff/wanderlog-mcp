@@ -1,0 +1,18 @@
+# Deploy DEV
+#
+# Runs on every push to `dev` - builds/pushes/deploys against the DEV EC2 host
+# (moosasharieff-dev-*), so changes can be verified there before ever reaching PROD.
+# See branch-guard.yml, which requires a `dev` -> `main` PR before anything is promoted.
+
+name: Deploy DEV
+
+on:
+  push:
+    branches: [dev]
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/_deploy-mcp.yml
+    with:
+      environment: dev
+    secrets: inherit
