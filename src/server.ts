@@ -6,66 +6,30 @@ import {
   addChecklistDescription,
   addChecklistInputSchema,
 } from "./tools/add-checklist.js";
-import {
-  addExpense,
-  addExpenseDescription,
-  addExpenseInputSchema,
-} from "./tools/add-expense.js";
+import { addExpense, addExpenseDescription, addExpenseInputSchema } from "./tools/add-expense.js";
 import {
   annotatePlace,
   annotatePlaceDescription,
   annotatePlaceInputSchema,
 } from "./tools/annotate-place.js";
-import {
-  addHotel,
-  addHotelDescription,
-  addHotelInputSchema,
-} from "./tools/add-hotel.js";
-import {
-  addNote,
-  addNoteDescription,
-  addNoteInputSchema,
-} from "./tools/add-note.js";
-import {
-  addPlace,
-  addPlaceDescription,
-  addPlaceInputSchema,
-} from "./tools/add-place.js";
-import {
-  createTrip,
-  createTripDescription,
-  createTripInputSchema,
-} from "./tools/create-trip.js";
-import {
-  getTrip,
-  getTripDescription,
-  getTripInputSchema,
-} from "./tools/get-trip.js";
-import {
-  getTripUrl,
-  getTripUrlDescription,
-  getTripUrlInputSchema,
-} from "./tools/get-trip-url.js";
+import { addHotel, addHotelDescription, addHotelInputSchema } from "./tools/add-hotel.js";
+import { addNote, addNoteDescription, addNoteInputSchema } from "./tools/add-note.js";
+import { addPlace, addPlaceDescription, addPlaceInputSchema } from "./tools/add-place.js";
+import { createTrip, createTripDescription, createTripInputSchema } from "./tools/create-trip.js";
+import { getTrip, getTripDescription, getTripInputSchema } from "./tools/get-trip.js";
+import { getTripUrl, getTripUrlDescription, getTripUrlInputSchema } from "./tools/get-trip-url.js";
 import {
   getTripForwardingEmail,
   getTripForwardingEmailDescription,
   getTripForwardingEmailInputSchema,
 } from "./tools/get-trip-forwarding-email.js";
-import {
-  listTrips,
-  listTripsDescription,
-  listTripsInputSchema,
-} from "./tools/list-trips.js";
+import { listTrips, listTripsDescription, listTripsInputSchema } from "./tools/list-trips.js";
 import {
   removePlace,
   removePlaceDescription,
   removePlaceInputSchema,
 } from "./tools/remove-place.js";
-import {
-  moveBlock,
-  moveBlockDescription,
-  moveBlockInputSchema,
-} from "./tools/move-block.js";
+import { moveBlock, moveBlockDescription, moveBlockInputSchema } from "./tools/move-block.js";
 import {
   searchPlaces,
   searchPlacesDescription,
@@ -81,21 +45,14 @@ import {
   updateTripDatesDescription,
   updateTripDatesInputSchema,
 } from "./tools/update-trip-dates.js";
+import { renameDay, renameDayDescription, renameDayInputSchema } from "./tools/rename-day.js";
+import { editNote, editNoteDescription, editNoteInputSchema } from "./tools/edit-note.js";
 import {
-  renameDay,
-  renameDayDescription,
-  renameDayInputSchema,
-} from "./tools/rename-day.js";
-import {
-  editNote,
-  editNoteDescription,
-  editNoteInputSchema,
-} from "./tools/edit-note.js";
-import {
-  removeNote,
-  removeNoteDescription,
-  removeNoteInputSchema,
-} from "./tools/remove-note.js";
+  setChecklistItem,
+  setChecklistItemDescription,
+  setChecklistItemInputSchema,
+} from "./tools/set-checklist-item.js";
+import { removeNote, removeNoteDescription, removeNoteInputSchema } from "./tools/remove-note.js";
 import {
   listExpenses,
   listExpensesDescription,
@@ -116,21 +73,13 @@ import {
   searchGuidesDescription,
   searchGuidesInputSchema,
 } from "./tools/search-guides.js";
-import {
-  getGuide,
-  getGuideDescription,
-  getGuideInputSchema,
-} from "./tools/get-guide.js";
+import { getGuide, getGuideDescription, getGuideInputSchema } from "./tools/get-guide.js";
 import {
   listJournal,
   listJournalDescription,
   listJournalInputSchema,
 } from "./tools/list-journal.js";
-import {
-  addJournal,
-  addJournalDescription,
-  addJournalInputSchema,
-} from "./tools/add-journal.js";
+import { addJournal, addJournalDescription, addJournalInputSchema } from "./tools/add-journal.js";
 import {
   editJournal,
   editJournalDescription,
@@ -141,11 +90,7 @@ import {
   removeJournalDescription,
   removeJournalInputSchema,
 } from "./tools/remove-journal.js";
-import {
-  addSection,
-  addSectionDescription,
-  addSectionInputSchema,
-} from "./tools/add-section.js";
+import { addSection, addSectionDescription, addSectionInputSchema } from "./tools/add-section.js";
 import {
   updateSection,
   updateSectionDescription,
@@ -156,6 +101,17 @@ import {
   deleteSectionDescription,
   deleteSectionInputSchema,
 } from "./tools/delete-section.js";
+import { movePlace, movePlaceDescription, movePlaceInputSchema } from "./tools/move-place.js";
+import {
+  reorderPlaces,
+  reorderPlacesDescription,
+  reorderPlacesInputSchema,
+} from "./tools/reorder-places.js";
+import {
+  reorderSections,
+  reorderSectionsDescription,
+  reorderSectionsInputSchema,
+} from "./tools/reorder-sections.js";
 import { addTransit, addTransitDescription, addTransitInputSchema } from "./tools/add-transit.js";
 import {
   addCarRental,
@@ -173,9 +129,7 @@ const AUTH_ERROR_RESPONSE = {
   isError: true,
 };
 
-type ToolHandler = (
-  args: Record<string, unknown>,
-) => Promise<{
+type ToolHandler = (args: Record<string, unknown>) => Promise<{
   content: { type: "text"; text: string }[];
   isError?: boolean;
 }>;
@@ -201,10 +155,7 @@ async function ensureAuthenticated(ctx: AppContext): Promise<boolean> {
   return attempt;
 }
 
-export function requireAuth(
-  ctx: AppContext,
-  handler: ToolHandler,
-) {
+export function requireAuth(ctx: AppContext, handler: ToolHandler) {
   return async (args: Record<string, unknown>) => {
     if (!(await ensureAuthenticated(ctx))) return AUTH_ERROR_RESPONSE;
     return handler(args);
@@ -242,6 +193,10 @@ of places. A complete itinerary uses these building blocks:
      your own trips use wanderlog_get_trip.
   8. wanderlog_add_transit — ferry / bus / train legs between places (carrier, from/to, dates,
      times). wanderlog_add_car_rental — a rental car with pick-up and drop-off locations/times.
+  9. wanderlog_move_place moves an existing place between a list and day without losing
+     metadata; wanderlog_reorder_places changes its position within one container.
+     wanderlog_reorder_sections changes the relative order of custom lists. Never guess when
+     a place or section reference is ambiguous — refine the reference first.
 
 Example add_place call with all features:
   wanderlog_add_place(trip_key, place: "Sensō-ji", day: "day 1",
@@ -308,7 +263,8 @@ export function buildServer(ctx: AppContext): McpServer {
       inputSchema: getTripForwardingEmailInputSchema,
     },
     requireAuth(ctx, async (args) =>
-      getTripForwardingEmail(ctx, args as Parameters<typeof getTripForwardingEmail>[1])),
+      getTripForwardingEmail(ctx, args as Parameters<typeof getTripForwardingEmail>[1]),
+    ),
   );
 
   server.registerTool(
@@ -328,9 +284,7 @@ export function buildServer(ctx: AppContext): McpServer {
       description: searchGuidesDescription,
       inputSchema: searchGuidesInputSchema,
     },
-    requireAuth(ctx, async (args) =>
-      searchGuides(ctx, args as Parameters<typeof searchGuides>[1]),
-    ),
+    requireAuth(ctx, async (args) => searchGuides(ctx, args as Parameters<typeof searchGuides>[1])),
   );
 
   server.registerTool(
@@ -340,9 +294,7 @@ export function buildServer(ctx: AppContext): McpServer {
       description: getGuideDescription,
       inputSchema: getGuideInputSchema,
     },
-    requireAuth(ctx, async (args) =>
-      getGuide(ctx, args as Parameters<typeof getGuide>[1]),
-    ),
+    requireAuth(ctx, async (args) => getGuide(ctx, args as Parameters<typeof getGuide>[1])),
   );
 
   server.registerTool(
@@ -352,9 +304,7 @@ export function buildServer(ctx: AppContext): McpServer {
       description: searchHotelsDescription,
       inputSchema: searchHotelsInputSchema,
     },
-    requireAuth(ctx, async (args) =>
-      searchHotels(ctx, args as Parameters<typeof searchHotels>[1]),
-    ),
+    requireAuth(ctx, async (args) => searchHotels(ctx, args as Parameters<typeof searchHotels>[1])),
   );
 
   server.registerTool(
@@ -415,7 +365,8 @@ export function buildServer(ctx: AppContext): McpServer {
       inputSchema: annotatePlaceInputSchema,
     },
     requireAuth(ctx, async (args) =>
-      annotatePlace(ctx, args as Parameters<typeof annotatePlace>[1])),
+      annotatePlace(ctx, args as Parameters<typeof annotatePlace>[1]),
+    ),
   );
 
   server.registerTool(
@@ -425,8 +376,7 @@ export function buildServer(ctx: AppContext): McpServer {
       description: addExpenseDescription,
       inputSchema: addExpenseInputSchema,
     },
-    requireAuth(ctx, async (args) =>
-      addExpense(ctx, args as Parameters<typeof addExpense>[1])),
+    requireAuth(ctx, async (args) => addExpense(ctx, args as Parameters<typeof addExpense>[1])),
   );
 
   server.registerTool(
@@ -436,8 +386,7 @@ export function buildServer(ctx: AppContext): McpServer {
       description: listExpensesDescription,
       inputSchema: listExpensesInputSchema,
     },
-    requireAuth(ctx, async (args) =>
-      listExpenses(ctx, args as Parameters<typeof listExpenses>[1])),
+    requireAuth(ctx, async (args) => listExpenses(ctx, args as Parameters<typeof listExpenses>[1])),
   );
 
   server.registerTool(
@@ -448,7 +397,8 @@ export function buildServer(ctx: AppContext): McpServer {
       inputSchema: removeExpenseInputSchema,
     },
     requireAuth(ctx, async (args) =>
-      removeExpense(ctx, args as Parameters<typeof removeExpense>[1])),
+      removeExpense(ctx, args as Parameters<typeof removeExpense>[1]),
+    ),
   );
 
   server.registerTool(
@@ -458,8 +408,7 @@ export function buildServer(ctx: AppContext): McpServer {
       description: editExpenseDescription,
       inputSchema: editExpenseInputSchema,
     },
-    requireAuth(ctx, async (args) =>
-      editExpense(ctx, args as Parameters<typeof editExpense>[1])),
+    requireAuth(ctx, async (args) => editExpense(ctx, args as Parameters<typeof editExpense>[1])),
   );
 
   server.registerTool(
@@ -493,6 +442,18 @@ export function buildServer(ctx: AppContext): McpServer {
   );
 
   server.registerTool(
+    "wanderlog_set_checklist_item",
+    {
+      title: "Tick or untick a checklist item in a Wanderlog trip",
+      description: setChecklistItemDescription,
+      inputSchema: setChecklistItemInputSchema,
+    },
+    requireAuth(ctx, async (args) =>
+      setChecklistItem(ctx, args as Parameters<typeof setChecklistItem>[1]),
+    ),
+  );
+
+  server.registerTool(
     "wanderlog_remove_note",
     {
       title: "Remove a note from a Wanderlog trip",
@@ -510,7 +471,8 @@ export function buildServer(ctx: AppContext): McpServer {
       inputSchema: updateTripDatesInputSchema,
     },
     requireAuth(ctx, async (args) =>
-      updateTripDates(ctx, args as Parameters<typeof updateTripDates>[1])),
+      updateTripDates(ctx, args as Parameters<typeof updateTripDates>[1]),
+    ),
   );
 
   server.registerTool(
@@ -520,8 +482,7 @@ export function buildServer(ctx: AppContext): McpServer {
       description: renameDayDescription,
       inputSchema: renameDayInputSchema,
     },
-    requireAuth(ctx, async (args) =>
-      renameDay(ctx, args as Parameters<typeof renameDay>[1])),
+    requireAuth(ctx, async (args) => renameDay(ctx, args as Parameters<typeof renameDay>[1])),
   );
 
   server.registerTool(
@@ -531,8 +492,7 @@ export function buildServer(ctx: AppContext): McpServer {
       description: listJournalDescription,
       inputSchema: listJournalInputSchema,
     },
-    requireAuth(ctx, async (args) =>
-      listJournal(ctx, args as Parameters<typeof listJournal>[1])),
+    requireAuth(ctx, async (args) => listJournal(ctx, args as Parameters<typeof listJournal>[1])),
   );
 
   server.registerTool(
@@ -542,8 +502,7 @@ export function buildServer(ctx: AppContext): McpServer {
       description: addJournalDescription,
       inputSchema: addJournalInputSchema,
     },
-    requireAuth(ctx, async (args) =>
-      addJournal(ctx, args as Parameters<typeof addJournal>[1])),
+    requireAuth(ctx, async (args) => addJournal(ctx, args as Parameters<typeof addJournal>[1])),
   );
 
   server.registerTool(
@@ -553,8 +512,7 @@ export function buildServer(ctx: AppContext): McpServer {
       description: editJournalDescription,
       inputSchema: editJournalInputSchema,
     },
-    requireAuth(ctx, async (args) =>
-      editJournal(ctx, args as Parameters<typeof editJournal>[1])),
+    requireAuth(ctx, async (args) => editJournal(ctx, args as Parameters<typeof editJournal>[1])),
   );
 
   server.registerTool(
@@ -565,7 +523,8 @@ export function buildServer(ctx: AppContext): McpServer {
       inputSchema: removeJournalInputSchema,
     },
     requireAuth(ctx, async (args) =>
-      removeJournal(ctx, args as Parameters<typeof removeJournal>[1])),
+      removeJournal(ctx, args as Parameters<typeof removeJournal>[1]),
+    ),
   );
 
   server.registerTool(
@@ -574,9 +533,14 @@ export function buildServer(ctx: AppContext): McpServer {
       title: "Add a custom section to a Wanderlog trip",
       description: addSectionDescription,
       inputSchema: addSectionInputSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      },
     },
-    requireAuth(ctx, async (args) =>
-      addSection(ctx, args as Parameters<typeof addSection>[1])),
+    requireAuth(ctx, async (args) => addSection(ctx, args as Parameters<typeof addSection>[1])),
   );
 
   server.registerTool(
@@ -585,9 +549,16 @@ export function buildServer(ctx: AppContext): McpServer {
       title: "Rename a custom section in a Wanderlog trip",
       description: updateSectionDescription,
       inputSchema: updateSectionInputSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     requireAuth(ctx, async (args) =>
-      updateSection(ctx, args as Parameters<typeof updateSection>[1])),
+      updateSection(ctx, args as Parameters<typeof updateSection>[1]),
+    ),
   );
 
   server.registerTool(
@@ -596,9 +567,68 @@ export function buildServer(ctx: AppContext): McpServer {
       title: "Delete a custom section from a Wanderlog trip",
       description: deleteSectionDescription,
       inputSchema: deleteSectionInputSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
     },
     requireAuth(ctx, async (args) =>
-      deleteSection(ctx, args as Parameters<typeof deleteSection>[1])),
+      deleteSection(ctx, args as Parameters<typeof deleteSection>[1]),
+    ),
+  );
+
+  server.registerTool(
+    "wanderlog_move_place",
+    {
+      title: "Move a place to another list or day",
+      description: movePlaceDescription,
+      inputSchema: movePlaceInputSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    requireAuth(ctx, async (args) => movePlace(ctx, args as Parameters<typeof movePlace>[1])),
+  );
+
+  server.registerTool(
+    "wanderlog_reorder_places",
+    {
+      title: "Reorder places within a list or day",
+      description: reorderPlacesDescription,
+      inputSchema: reorderPlacesInputSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    requireAuth(ctx, async (args) =>
+      reorderPlaces(ctx, args as Parameters<typeof reorderPlaces>[1]),
+    ),
+  );
+
+  server.registerTool(
+    "wanderlog_reorder_sections",
+    {
+      title: "Reorder custom lists",
+      description: reorderSectionsDescription,
+      inputSchema: reorderSectionsInputSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    requireAuth(ctx, async (args) =>
+      reorderSections(ctx, args as Parameters<typeof reorderSections>[1]),
+    ),
   );
 
   server.registerTool(

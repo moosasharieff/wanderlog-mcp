@@ -54,10 +54,7 @@ function makeFakeContext(failures: Array<Error | null>): {
 }
 
 const rateLimitError = () =>
-  new WanderlogError(
-    "Wanderlog rejected the request (4001): Too many requests",
-    "rate_limited",
-  );
+  new WanderlogError("Wanderlog rejected the request (4001): Too many requests", "rate_limited");
 
 describe("submitOp rate-limit retry", () => {
   beforeEach(() => {
@@ -108,9 +105,7 @@ describe("submitOp rate-limit retry", () => {
   );
 
   it("invalidates after an ambiguous non-rate-limit error", async () => {
-    const fake = makeFakeContext([
-      new WanderlogError("Submit op timeout", "submit_timeout"),
-    ]);
+    const fake = makeFakeContext([new WanderlogError("Submit op timeout", "submit_timeout")]);
     await expect(
       submitOp(fake.ctx, "tripA", (_entry, submit) => submit(ops)),
     ).rejects.toMatchObject({
@@ -135,6 +130,7 @@ describe("ShareDBClient bare {code, message} rejection frames", () => {
   } {
     const client = new ShareDBClient(config, "tripA");
     const internals = client as unknown as {
+      handshakeComplete: boolean;
       pendingOps: Map<
         number,
         { resolve: () => void; reject: (err: Error) => void; timer: NodeJS.Timeout }
@@ -143,8 +139,10 @@ describe("ShareDBClient bare {code, message} rejection frames", () => {
         frame: Record<string, unknown>,
         handshakeTimeout: NodeJS.Timeout,
         connectResolve: () => void,
+        connectReject: (err: Error) => void,
       ) => void;
     };
+    internals.handshakeComplete = true;
     const pending = new Promise<void>((resolve, reject) => {
       internals.pendingOps.set(1, {
         resolve,
@@ -162,9 +160,15 @@ describe("ShareDBClient bare {code, message} rejection frames", () => {
           frame: Record<string, unknown>,
           handshakeTimeout: NodeJS.Timeout,
           connectResolve: () => void,
+          connectReject: (err: Error) => void,
         ) => void;
       }
-    ).handleFrame(frame, setTimeout(() => {}, 60_000), () => {});
+    ).handleFrame(
+      frame,
+      setTimeout(() => {}, 60_000),
+      () => {},
+      () => {},
+    );
   }
 
   it("maps code 4001 to a rate_limited error on pending ops", async () => {

@@ -43,7 +43,7 @@ on:
   workflow_call:
     inputs:
       environment:
-        description: "Environment name, used to build the resource prefix (e.g. \"dev\", \"prod\")"
+        description: 'Environment name, used to build the resource prefix (e.g. "dev", "prod")'
         required: true
         type: string
 

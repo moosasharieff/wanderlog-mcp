@@ -49,10 +49,7 @@ export function latestTag(environment: string): string {
   return `wanderlog-mcp-${environment}-latest`;
 }
 
-export type ImageExistsCheck = (params: {
-  repositoryName: string;
-  imageTag: string;
-}) => boolean;
+export type ImageExistsCheck = (params: { repositoryName: string; imageTag: string }) => boolean;
 
 export interface DecideBuildParams {
   environment: string;
@@ -138,7 +135,11 @@ async function main() {
 
   console.log(`build hash: ${hash} (${files.length} files in build context)`);
   console.log(`image tag: ${decision.tag}`);
-  console.log(decision.skip ? "SKIP: image already exists, nothing changed" : "BUILD: no matching image found");
+  console.log(
+    decision.skip
+      ? "SKIP: image already exists, nothing changed"
+      : "BUILD: no matching image found",
+  );
 
   const githubOutput = process.env.GITHUB_OUTPUT;
   if (githubOutput) {

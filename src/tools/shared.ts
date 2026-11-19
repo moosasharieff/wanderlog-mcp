@@ -3,11 +3,13 @@ import type { CacheEntry } from "../cache/trip-cache.js";
 import { WanderlogError, WanderlogValidationError } from "../errors.js";
 import type { Json0Op } from "../ot/apply.js";
 import { resolveDay } from "../resolvers/day.js";
+import { type DeltaOp, LINE_FORMATS, markdownToDelta } from "../rich-text.js";
 import type {
   Block,
   ChecklistItem,
   Geo,
   PlaceData,
+  QuillDelta,
   RentalCarEndpoint,
   Section,
   TransitEndpoint,
@@ -23,10 +25,7 @@ import { isPlaceBlock } from "../types.js";
  */
 const submitLocks = new Map<string, Promise<unknown>>();
 
-async function withSubmitLock<T>(
-  tripKey: string,
-  fn: () => Promise<T>,
-): Promise<T> {
+async function withSubmitLock<T>(tripKey: string, fn: () => Promise<T>): Promise<T> {
   const prev = submitLocks.get(tripKey) ?? Promise.resolve();
   // Chain regardless of whether the previous op succeeded or failed —
   // one failed op should not permanently block the queue.
@@ -54,10 +53,7 @@ async function withSubmitLock<T>(
 export async function submitOp<T>(
   ctx: AppContext,
   tripKey: string,
-  mutate: (
-    entry: CacheEntry,
-    submit: (ops: Json0Op[]) => Promise<void>,
-  ) => Promise<T> | T,
+  mutate: (entry: CacheEntry, submit: (ops: Json0Op[]) => Promise<void>) => Promise<T> | T,
 ): Promise<T> {
   return withSubmitLock(tripKey, async () => {
     const entry = await ctx.tripCache.getEntry(tripKey);
@@ -65,10 +61,7 @@ export async function submitOp<T>(
     const submit = async (ops: Json0Op[]): Promise<void> => {
       try {
         if (!client.isSubscribed) {
-          throw new WanderlogError(
-            `Trip ${tripKey} is not subscribed`,
-            "not_subscribed",
-          );
+          throw new WanderlogError(`Trip ${tripKey} is not subscribed`, "not_subscribed");
         }
         await submitWithRateLimitRetry(client, ops);
       } catch (err) {
@@ -98,10 +91,7 @@ const CONFIRMED_NON_APPLICATION_CODES = new Set([
 ]);
 
 function isConfirmedNonApplication(err: unknown): boolean {
-  return (
-    err instanceof WanderlogError &&
-    CONFIRMED_NON_APPLICATION_CODES.has(err.code)
-  );
+  return err instanceof WanderlogError && CONFIRMED_NON_APPLICATION_CODES.has(err.code);
 }
 
 const RATE_LIMIT_RETRY_DELAYS_MS = [2_000, 4_000, 8_000];
@@ -120,14 +110,11 @@ async function submitWithRateLimitRetry(
       await client.submit(ops);
       return;
     } catch (err) {
-      const isRateLimit =
-        err instanceof WanderlogError && err.code === "rate_limited";
+      const isRateLimit = err instanceof WanderlogError && err.code === "rate_limited";
       if (!isRateLimit || attempt >= RATE_LIMIT_RETRY_DELAYS_MS.length) {
         throw err;
       }
-      await new Promise((r) =>
-        setTimeout(r, RATE_LIMIT_RETRY_DELAYS_MS[attempt]),
-      );
+      await new Promise((r) => setTimeout(r, RATE_LIMIT_RETRY_DELAYS_MS[attempt]));
       attempt += 1;
     }
   }
@@ -167,17 +154,58 @@ export function findSectionByRef(
   trip: TripPlan,
   ref: string,
 ): { index: number; section: Section } | null {
+  const resolved = resolveSectionRef(trip, ref);
+  return resolved.kind === "unique" ? resolved.match : null;
+}
+
+export type SectionMatch = { index: number; section: Section };
+
+export type SectionRefResult =
+  | { kind: "unique"; match: SectionMatch }
+  | { kind: "ambiguous"; candidates: SectionMatch[] }
+  | { kind: "none" };
+
+/**
+ * Resolve a section heading without silently picking the first duplicate.
+ * The default list aliases remain unambiguous because they resolve by section
+ * identity instead of heading. All other headings return every match so
+ * mutation tools can fail safely when a trip contains duplicate list names.
+ */
+export function resolveSectionRef(trip: TripPlan, ref: string): SectionRefResult {
   const normalized = ref.trim().toLowerCase();
   if (normalized === "places to visit" || normalized === "places") {
-    return findPlacesToVisitSection(trip);
+    const found = findPlacesToVisitSection(trip);
+    return found ? { kind: "unique", match: found } : { kind: "none" };
   }
+
+  const candidates: SectionMatch[] = [];
   for (let i = 0; i < trip.itinerary.sections.length; i++) {
-    const s = trip.itinerary.sections[i]!;
-    if (s.heading.trim().toLowerCase() === normalized) {
-      return { index: i, section: s };
+    const section = trip.itinerary.sections[i]!;
+    if (section.heading.trim().toLowerCase() === normalized) {
+      candidates.push({ index: i, section });
     }
   }
-  return null;
+  if (candidates.length === 0) return { kind: "none" };
+  if (candidates.length === 1) return { kind: "unique", match: candidates[0]! };
+  return { kind: "ambiguous", candidates };
+}
+
+const SYSTEM_SECTION_TYPES = new Set(["hotels", "flights", "transit", "rentalCars"]);
+
+export function isSystemSection(section: Section): boolean {
+  return SYSTEM_SECTION_TYPES.has(section.type);
+}
+
+/** Custom undated lists that users may rename, delete, or reorder. */
+export function isCustomSection(trip: TripPlan, index: number): boolean {
+  const section = trip.itinerary.sections[index];
+  if (!section || section.mode === "dayPlan" || isSystemSection(section)) return false;
+  return findPlacesToVisitSection(trip)?.index !== index;
+}
+
+export function describeSection(section: Section): string {
+  if (section.mode === "dayPlan" && section.date) return `day ${section.date}`;
+  return `section "${section.heading || "(untitled)"}"`;
 }
 
 export function findBlockById(
@@ -207,20 +235,14 @@ export function assertBlockAtPath(
 ): Block {
   const block = trip.itinerary.sections[sectionIndex]?.blocks[blockIndex];
   if (!block || block.id !== blockId) {
-    throw new WanderlogError(
-      `Block ${blockId} moved while preparing the mutation`,
-      "stale_target",
-    );
+    throw new WanderlogError(`Block ${blockId} moved while preparing the mutation`, "stale_target");
   }
   return block;
 }
 
 export function requireUserId(ctx: AppContext): number {
   if (ctx.userId == null) {
-    throw new WanderlogError(
-      "User ID not available — auth probe has not completed",
-      "no_user_id",
-    );
+    throw new WanderlogError("User ID not available — auth probe has not completed", "no_user_id");
   }
   return ctx.userId;
 }
@@ -323,10 +345,7 @@ export function findDaySectionByDate(
  *   2. The trip's first associated geo (from /api/tripPlans/{key} resources)
  *   3. Null if both are absent
  */
-export function findTripCenter(
-  trip: TripPlan,
-  geos?: Geo[],
-): { lat: number; lng: number } | null {
+export function findTripCenter(trip: TripPlan, geos?: Geo[]): { lat: number; lng: number } | null {
   for (const section of trip.itinerary.sections) {
     for (const block of section.blocks) {
       if (!isPlaceBlock(block)) continue;
@@ -349,10 +368,7 @@ export type TargetSection = {
   label: string;
 };
 
-export function findTargetSection(
-  trip: TripPlan,
-  day?: string,
-): TargetSection {
+export function findTargetSection(trip: TripPlan, day?: string): TargetSection {
   if (day) {
     const daySection = resolveDay(trip, day);
     const found = findDaySectionByDate(trip, daySection.date!);
@@ -405,11 +421,11 @@ export function findBlockTargetSection(
 }
 
 /** Build a note block matching the shape captured from the Wanderlog UI. */
-export function buildNoteBlock(userId: number): Record<string, unknown> {
+export function buildNoteBlock(userId: number, text = ""): Record<string, unknown> {
   return {
     id: generateBlockId(),
     type: "note",
-    text: { ops: [{ insert: "\n" }] },
+    text: buildNoteDelta(text),
     addedBy: { type: "user", userId },
     attachments: [],
   };
@@ -434,7 +450,7 @@ export function buildTransitBlock(
     depart: args.depart,
     arrive: args.arrive,
     addedBy: { type: "user", userId },
-    text: { ops: [{ insert: args.notes ? `${args.notes}\n` : "\n" }] },
+    text: buildNoteDelta(args.notes),
     attachments: [],
   };
   if (args.confirmationNumber) block.confirmationNumber = args.confirmationNumber;
@@ -460,7 +476,7 @@ export function buildRentalCarBlock(
     addedBy: { type: "user", userId },
     pickUp: args.pickUp,
     dropOff: args.dropOff,
-    text: { ops: [{ insert: args.notes ? `${args.notes}\n` : "\n" }] },
+    text: buildNoteDelta(args.notes),
     attachments: [],
   };
   if (args.confirmationNumber) block.confirmationNumber = args.confirmationNumber;
@@ -583,7 +599,7 @@ export function buildChecklistBlock(
   const checklistItems: ChecklistItem[] = items.map((text) => ({
     id: generateBlockId(),
     checked: false,
-    text: { ops: [{ insert: `${text}\n` }] },
+    text: buildNoteDelta(text),
   }));
   return {
     id: generateBlockId(),
@@ -625,9 +641,7 @@ export function isValidDate(dateStr: string): boolean {
   const [year, month, day] = dateStr.split("-").map((s) => parseInt(s, 10));
   const date = new Date(Date.UTC(year!, month! - 1, day!));
   return (
-    date.getUTCFullYear() === year &&
-    date.getUTCMonth() === month! - 1 &&
-    date.getUTCDate() === day
+    date.getUTCFullYear() === year && date.getUTCMonth() === month! - 1 && date.getUTCDate() === day
   );
 }
 
@@ -639,4 +653,55 @@ export function validateDateRange(startDate: string, endDate: string): void {
       `end_date (${endDate}) must be on or after start_date (${startDate}).`,
     );
   }
+}
+
+/**
+ * Length in Quill units, where an embed counts as one. Sizing a delete off the
+ * plain text instead leaves part of the old note behind when it holds an image.
+ */
+export function quillLength(delta: QuillDelta | undefined): number {
+  return (delta?.ops ?? []).reduce((total, op) => {
+    if (typeof op.insert === "string") return total + op.insert.length;
+    return op.insert === undefined ? total : total + 1;
+  }, 0);
+}
+
+export function normalizeNote(note: string): string {
+  return note.replace(/\n+$/, "");
+}
+
+/**
+ * A bare `insert` inserts at offset 0 rather than replacing, so the existing
+ * note has to be deleted explicitly. The document's trailing newline is kept
+ * and the replacement goes in ahead of it; since that newline holds the last
+ * line's list format, it is retained with the new line's format.
+ */
+export function buildNoteReplaceDelta(
+  existing: QuillDelta | undefined,
+  note: string,
+): Array<Record<string, unknown>> {
+  const lastOp = existing?.ops?.at(-1);
+  const keepsTerminator = typeof lastOp?.insert === "string" && lastOp.insert.endsWith("\n");
+  const deleteLen = quillLength(existing) - (keepsTerminator ? 1 : 0);
+
+  const ops: DeltaOp[] = markdownToDelta(`${normalizeNote(note)}\n`);
+  if (deleteLen > 0) ops.unshift({ delete: deleteLen });
+  if (!keepsTerminator) return ops;
+
+  const terminator = ops.pop()!;
+  const text = terminator.insert as string;
+  if (text.length > 1) ops.push({ ...terminator, insert: text.slice(0, -1) });
+
+  const format: Record<string, unknown> = {};
+  for (const key of LINE_FORMATS) {
+    const next = terminator.attributes?.[key] ?? null;
+    if ((lastOp?.attributes?.[key] ?? null) !== next) format[key] = next;
+  }
+  if (Object.keys(format).length > 0) ops.push({ retain: 1, attributes: format });
+  return ops;
+}
+
+/** Note text as a fresh Quill document, with the trailing newline Quill expects. */
+export function buildNoteDelta(text: string | undefined): QuillDelta {
+  return { ops: text ? markdownToDelta(`${text}\n`) : [{ insert: "\n" }] };
 }

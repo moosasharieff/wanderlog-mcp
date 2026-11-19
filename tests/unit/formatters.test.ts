@@ -122,6 +122,18 @@ describe("transit block formatting", () => {
     }
   });
 
+  it("includes the transit block's note text", () => {
+    const withNote = {
+      ...(mkTransit("bus") as object),
+      text: { ops: [{ insert: "Be at stop H2 by 9:20. E-ticket emailed.\n" }] },
+    } as unknown as Block;
+    expect(formatBlockLine(withNote, "concise")).toContain("📝 Be at stop H2 by 9:20.");
+    expect(formatBlockLine(withNote, "detailed")).toContain(
+      "📝 Be at stop H2 by 9:20. E-ticket emailed.",
+    );
+    expect(formatBlockLine(mkTransit("bus"), "detailed")).not.toContain("📝");
+  });
+
   it("renders a rentalCar with pickup/dropoff", () => {
     const rental = {
       id: 2,
@@ -139,5 +151,33 @@ describe("transit block formatting", () => {
     expect(line).toContain("Europcar CUN");
     expect(line).toContain("Europcar PDC");
     expect(line).toContain("R9");
+  });
+});
+
+describe("note formatting", () => {
+  const place = {
+    id: 1,
+    type: "place",
+    place: { name: "Col des Posettes", place_id: "p" },
+    text: {
+      ops: [
+        { insert: "Option A", attributes: { bold: true } },
+        { insert: "\nGPX: " },
+        { insert: "komoot.com", attributes: { link: "https://www.komoot.com/smarttour/1" } },
+        { insert: "\n" },
+      ],
+    },
+  } as unknown as Block;
+
+  it("detailed format renders bold and links as Markdown and keeps line breaks", () => {
+    const line = formatBlockLine(place, "detailed")!;
+    expect(line).toContain(
+      "📝 **Option A**\n      GPX: [komoot.com](https://www.komoot.com/smarttour/1)",
+    );
+  });
+
+  it("concise format keeps the Markdown on one line", () => {
+    const line = formatBlockLine(place, "concise")!;
+    expect(line).toContain("📝 **Option A** GPX: [komoot.com](https://www.komoot.com/smarttour/1)");
   });
 });
