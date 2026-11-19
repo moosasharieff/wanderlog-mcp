@@ -19,10 +19,15 @@
 # nothing analogous to ynab-mcp-server's RECEIPTS_* wiring here - no AWS resources are
 # needed for this app beyond the shared EC2 host + ECR repo.
 #
-# NEW_RELIC_LICENSE_KEY follows the same per-environment secret pattern ynab-mcp-server
-# uses (NEW_RELIC_LICENSE_KEY_DEV/PROD). NEW_RELIC_APP_NAME, NEW_RELIC_NO_CONFIG_FILE,
-# and NEW_RELIC_LOG are not secrets - they're derived/fixed literals, set directly in
-# the docker run command without any GitHub secret lookup.
+# No GitHub secret is used anywhere in this workflow:
+# - AWS access is via OIDC (personal-infra's modules/github_oidc) - vars.AWS_ROLE_ARN is
+#   a plain repo *variable* (not a secret), since a role ARN isn't sensitive on its own.
+# - EC2_SSH_KEY and the New Relic license key live in the environment's AWS Secrets
+#   Manager container (${PREFIX}/secrets) instead of per-repo GitHub Secrets - see the
+#   "Fetch deploy secrets" step below. Each value is masked the moment it's read, before
+#   anything else touches it.
+# - ECR_REGISTRY isn't actually a secret (it's just <account-id>.dkr.ecr.<region>.amazonaws.com)
+#   - it's computed from the caller identity instead of stored anywhere.
 #
 # Images are tagged by content hash (src/scripts/buildIfChanged.ts), not just
 # "-latest" - if an image already exists in this environment's ECR repo under the
@@ -47,6 +52,10 @@ jobs:
     name: Deploy (${{ inputs.environment }})
     runs-on: ubuntu-latest
 
+    permissions:
+      id-token: write
+      contents: read
+
     env:
       PREFIX: moosasharieff-${{ inputs.environment }}
 
@@ -57,9 +66,35 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: eu-west-1
+
+      - name: Resolve ECR registry
+        id: ecr
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "registry=$ACCOUNT_ID.dkr.ecr.eu-west-1.amazonaws.com" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch deploy secrets from AWS Secrets Manager
+        id: secrets
+        run: |
+          SECRET_JSON=$(aws secretsmanager get-secret-value \
+            --secret-id "${PREFIX}/secrets" \
+            --region eu-west-1 \
+            --query SecretString --output text)
+
+          EC2_SSH_KEY=$(echo "$SECRET_JSON" | jq -r '.ec2.ssh_private_key')
+          NEW_RELIC_LICENSE_KEY=$(echo "$SECRET_JSON" | jq -r '.newrelic.wanderlog_mcp_license_key')
+
+          echo "::add-mask::$EC2_SSH_KEY"
+          echo "::add-mask::$NEW_RELIC_LICENSE_KEY"
+
+          {
+            echo "ec2_ssh_key<<EC2_SSH_KEY_EOF"
+            echo "$EC2_SSH_KEY"
+            echo "EC2_SSH_KEY_EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "new_relic_license_key=$NEW_RELIC_LICENSE_KEY" >> "$GITHUB_OUTPUT"
 
       - name: Get EC2 IP
         run: |
@@ -95,33 +130,28 @@ jobs:
       - name: Build and push image to ECR
         if: steps.build-check.outputs.skip != 'true'
         run: |
-          docker build -t ${{ secrets.ECR_REGISTRY }}/${PREFIX}/app:${{ steps.build-check.outputs.tag }} .
-          docker tag ${{ secrets.ECR_REGISTRY }}/${PREFIX}/app:${{ steps.build-check.outputs.tag }} ${{ secrets.ECR_REGISTRY }}/${PREFIX}/app:${{ steps.build-check.outputs.latest_tag }}
-          docker push ${{ secrets.ECR_REGISTRY }}/${PREFIX}/app:${{ steps.build-check.outputs.tag }}
-          docker push ${{ secrets.ECR_REGISTRY }}/${PREFIX}/app:${{ steps.build-check.outputs.latest_tag }}
+          docker build -t ${{ steps.ecr.outputs.registry }}/${PREFIX}/app:${{ steps.build-check.outputs.tag }} .
+          docker tag ${{ steps.ecr.outputs.registry }}/${PREFIX}/app:${{ steps.build-check.outputs.tag }} ${{ steps.ecr.outputs.registry }}/${PREFIX}/app:${{ steps.build-check.outputs.latest_tag }}
+          docker push ${{ steps.ecr.outputs.registry }}/${PREFIX}/app:${{ steps.build-check.outputs.tag }}
+          docker push ${{ steps.ecr.outputs.registry }}/${PREFIX}/app:${{ steps.build-check.outputs.latest_tag }}
 
       - name: Get ECR login token for EC2
         id: ecr-token
         run: echo "token=$(aws ecr get-login-password --region eu-west-1)" >> $GITHUB_OUTPUT
 
-      - name: Select per-environment New Relic config
-        run: |
-          ENV_UPPER=$(echo "${{ inputs.environment }}" | tr '[:lower:]' '[:upper:]')
-          echo "NEW_RELIC_ENV_UPPER=$ENV_UPPER" >> $GITHUB_ENV
-
       - name: Deploy to EC2
         uses: appleboy/ssh-action@v1
         env:
-          ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
           ECR_REPO_PATH: ${{ env.PREFIX }}/app
           IMAGE_TAG: ${{ steps.build-check.outputs.tag }}
           ECR_TOKEN: ${{ steps.ecr-token.outputs.token }}
-          NEW_RELIC_LICENSE_KEY: ${{ secrets[format('NEW_RELIC_LICENSE_KEY_{0}', env.NEW_RELIC_ENV_UPPER)] }}
+          NEW_RELIC_LICENSE_KEY: ${{ steps.secrets.outputs.new_relic_license_key }}
           NEW_RELIC_APP_NAME: wanderlog-mcp-${{ inputs.environment }}
         with:
           host: ${{ env.EC2_IP }}
           username: ubuntu
-          key: ${{ secrets.EC2_SSH_KEY }}
+          key: ${{ steps.secrets.outputs.ec2_ssh_key }}
           envs: ECR_REGISTRY,ECR_REPO_PATH,IMAGE_TAG,ECR_TOKEN,NEW_RELIC_LICENSE_KEY,NEW_RELIC_APP_NAME
           script: |
             echo "$ECR_TOKEN" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
