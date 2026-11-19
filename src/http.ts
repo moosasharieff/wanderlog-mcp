@@ -163,11 +163,11 @@ async function main() {
     });
   };
 
-  app.post("/mcp", handleMcp);
-  app.get("/mcp", handleMcp);
-  app.delete("/mcp", handleMcp);
+  app.post("/wanderlog-mcp", handleMcp);
+  app.get("/wanderlog-mcp", handleMcp);
+  app.delete("/wanderlog-mcp", handleMcp);
 
-  // Health check for fly.io
+  // Health check
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   app.get("/health", (_req: any, res: any) => {
     res.status(200).json({ status: "ok" });

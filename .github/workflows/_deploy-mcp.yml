@@ -1,0 +1,170 @@
+# Deploy MCP Server (reusable)
+#
+# Builds and pushes the Docker image to the given environment's ECR repo, then SSHes
+# into that environment's EC2 host to pull and run it. Not triggered directly - called
+# by deploy-dev.yml (environment=dev) and deploy-prod.yml (environment=prod), which
+# supply the `environment` input.
+#
+# `environment` drives the resource-name prefix used to find this run's EC2
+# instance/security group and ECR repo path: "moosasharieff-<environment>-*" /
+# "moosasharieff-<environment>/app" (see personal-infra's locals.tf for where that
+# naming comes from). DEV and PROD are separate EC2 hosts, so both can use the same
+# container name/port (wanderlog-mcp on 3002) without colliding. The ECR repo path is
+# shared across every app in that environment - images are told apart by tag prefix
+# (wanderlog-mcp-<env>-<hash>), not by repository.
+#
+# The HTTP container takes no Wanderlog credential at all - it's multi-tenant. Each
+# caller's own Wanderlog `connect.sid` cookie is their bearer token, validated live
+# against wanderlog.com per request (see src/http.ts's getOrCreateContext). There is
+# nothing analogous to ynab-mcp-server's RECEIPTS_* wiring here - no AWS resources are
+# needed for this app beyond the shared EC2 host + ECR repo.
+#
+# No GitHub secret is used anywhere in this workflow:
+# - AWS access is via OIDC (personal-infra's modules/github_oidc) - vars.AWS_ROLE_ARN is
+#   a plain repo *variable* (not a secret), since a role ARN isn't sensitive on its own.
+# - EC2_SSH_KEY and the New Relic license key live in the environment's AWS Secrets
+#   Manager container (${PREFIX}/secrets) instead of per-repo GitHub Secrets - see the
+#   "Fetch deploy secrets" step below. Each value is masked the moment it's read, before
+#   anything else touches it.
+# - ECR_REGISTRY isn't actually a secret (it's just <account-id>.dkr.ecr.<region>.amazonaws.com)
+#   - it's computed from the caller identity instead of stored anywhere.
+#
+# Images are tagged by content hash (src/scripts/buildIfChanged.ts), not just
+# "-latest" - if an image already exists in this environment's ECR repo under the
+# current hash, the *build/push* steps are skipped, since the image itself hasn't
+# changed. The EC2 redeploy step is NOT gated on that flag, and runs on every
+# invocation regardless (against whichever tag applies - freshly built or already
+# existing): a push that only changes this workflow's env/secrets wiring, with no app
+# source changes, still needs the container recreated to pick that up.
+
+name: Deploy MCP Server (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment name, used to build the resource prefix (e.g. "dev", "prod")'
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    name: Deploy (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    env:
+      PREFIX: moosasharieff-${{ inputs.environment }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: eu-west-1
+
+      - name: Resolve ECR registry
+        id: ecr
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "registry=$ACCOUNT_ID.dkr.ecr.eu-west-1.amazonaws.com" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch deploy secrets from AWS Secrets Manager
+        id: secrets
+        run: |
+          SECRET_JSON=$(aws secretsmanager get-secret-value \
+            --secret-id "${PREFIX}/secrets" \
+            --region eu-west-1 \
+            --query SecretString --output text)
+
+          EC2_SSH_KEY=$(echo "$SECRET_JSON" | jq -r '.ec2.ssh_private_key')
+          NEW_RELIC_LICENSE_KEY=$(echo "$SECRET_JSON" | jq -r '.newrelic.wanderlog_mcp_license_key')
+
+          echo "::add-mask::$EC2_SSH_KEY"
+          echo "::add-mask::$NEW_RELIC_LICENSE_KEY"
+
+          {
+            echo "ec2_ssh_key<<EC2_SSH_KEY_EOF"
+            echo "$EC2_SSH_KEY"
+            echo "EC2_SSH_KEY_EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "new_relic_license_key=$NEW_RELIC_LICENSE_KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Get EC2 IP
+        run: |
+          EC2_IP=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=${PREFIX}-vm" \
+                      "Name=instance-state-name,Values=running" \
+            --query "Reservations[0].Instances[0].PublicIpAddress" \
+            --output text \
+            --region eu-west-1)
+          echo "EC2_IP=$EC2_IP" >> $GITHUB_ENV
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Determine whether to build
+        id: build-check
+        env:
+          BUILD_ENV: ${{ inputs.environment }}
+          ECR_REPOSITORY: ${{ env.PREFIX }}/app
+          AWS_REGION: eu-west-1
+        run: npx tsx src/scripts/buildIfChanged.ts
+
+      - name: Login to Amazon ECR
+        if: steps.build-check.outputs.skip != 'true'
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image to ECR
+        if: steps.build-check.outputs.skip != 'true'
+        run: |
+          docker build -t ${{ steps.ecr.outputs.registry }}/${PREFIX}/app:${{ steps.build-check.outputs.tag }} .
+          docker tag ${{ steps.ecr.outputs.registry }}/${PREFIX}/app:${{ steps.build-check.outputs.tag }} ${{ steps.ecr.outputs.registry }}/${PREFIX}/app:${{ steps.build-check.outputs.latest_tag }}
+          docker push ${{ steps.ecr.outputs.registry }}/${PREFIX}/app:${{ steps.build-check.outputs.tag }}
+          docker push ${{ steps.ecr.outputs.registry }}/${PREFIX}/app:${{ steps.build-check.outputs.latest_tag }}
+
+      - name: Get ECR login token for EC2
+        id: ecr-token
+        run: echo "token=$(aws ecr get-login-password --region eu-west-1)" >> $GITHUB_OUTPUT
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          ECR_REPO_PATH: ${{ env.PREFIX }}/app
+          IMAGE_TAG: ${{ steps.build-check.outputs.tag }}
+          ECR_TOKEN: ${{ steps.ecr-token.outputs.token }}
+          NEW_RELIC_LICENSE_KEY: ${{ steps.secrets.outputs.new_relic_license_key }}
+          NEW_RELIC_APP_NAME: wanderlog-mcp-${{ inputs.environment }}
+        with:
+          host: ${{ env.EC2_IP }}
+          username: ubuntu
+          key: ${{ steps.secrets.outputs.ec2_ssh_key }}
+          envs: ECR_REGISTRY,ECR_REPO_PATH,IMAGE_TAG,ECR_TOKEN,NEW_RELIC_LICENSE_KEY,NEW_RELIC_APP_NAME
+          script: |
+            echo "$ECR_TOKEN" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+            docker pull "$ECR_REGISTRY/$ECR_REPO_PATH:$IMAGE_TAG"
+            docker stop wanderlog-mcp || true
+            docker rm wanderlog-mcp || true
+            docker run -d \
+              --name wanderlog-mcp \
+              --restart unless-stopped \
+              -p 3002:3000 \
+              -e PORT=3000 \
+              -e "NEW_RELIC_LICENSE_KEY=$NEW_RELIC_LICENSE_KEY" \
+              -e "NEW_RELIC_APP_NAME=$NEW_RELIC_APP_NAME" \
+              -e "NEW_RELIC_NO_CONFIG_FILE=true" \
+              -e "NEW_RELIC_LOG=stderr" \
+              "$ECR_REGISTRY/$ECR_REPO_PATH:$IMAGE_TAG"
