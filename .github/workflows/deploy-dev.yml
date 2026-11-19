@@ -10,6 +10,14 @@ on:
   push:
     branches: [dev]
 
+# Must match (or exceed) what _deploy-mcp.yml's job requests - this repo's default
+# workflow permissions are read-only, which caps the reusable workflow call unless the
+# caller explicitly opts in here too. Without this, GitHub rejects the run outright
+# (startup_failure, zero jobs) rather than just denying the id-token at runtime.
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   deploy:
     uses: ./.github/workflows/_deploy-mcp.yml
