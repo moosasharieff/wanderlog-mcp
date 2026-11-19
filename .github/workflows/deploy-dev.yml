@@ -1,14 +1,17 @@
 # Deploy DEV
 #
-# Runs on every push to `dev` - builds/pushes/deploys against the DEV EC2 host
-# (moosasharieff-dev-*), so changes can be verified there before ever reaching PROD.
-# See branch-guard.yml, which requires a `dev` -> `main` PR before anything is promoted.
+# Manual-only (workflow_dispatch) - the DEV EC2 host and its Secrets Manager
+# container were deliberately torn down (personal-infra's dev workspace was
+# destroyed) once PROD was verified working. This used to auto-run on every push to
+# `dev`; left that way, every routine merge into dev would fail outright looking for
+# an EC2 instance/secrets container that no longer exist. Branch-guard's feature ->
+# dev -> main flow for code review is unaffected - only the automatic deploy on every
+# push to dev is gone. Run this manually once dev is reprovisioned.
 
 name: Deploy DEV
 
 on:
-  push:
-    branches: [dev]
+  workflow_dispatch:
 
 # Must match (or exceed) what _deploy-mcp.yml's job requests - this repo's default
 # workflow permissions are read-only, which caps the reusable workflow call unless the
