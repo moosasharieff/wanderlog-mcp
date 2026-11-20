@@ -3,12 +3,15 @@
 # Runs on every push to `main` - builds/pushes/deploys against the live PROD EC2 host
 # (moosasharieff-prod-*). branch-guard.yml ensures a PR can only reach `main` by coming
 # from `dev`, i.e. nothing lands here without first being deployed and verified in DEV.
+# Also workflow_dispatch-able, for redeploying onto a freshly (re)provisioned PROD host
+# without needing an unrelated code change to trigger a push.
 
 name: Deploy PROD
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   id-token: write
